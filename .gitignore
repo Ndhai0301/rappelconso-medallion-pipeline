@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment and local tooling
+.env
+.claude/
+.vscode/
+.idea/
+.DS_Store
+
+# Runtime state
+kafka/
+postgres/data/
+data/checkpoints/
+data/last_processed.json
+logs/
+.ivy2/

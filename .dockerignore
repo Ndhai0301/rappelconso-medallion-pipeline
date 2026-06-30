@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+.env
+.claude
+kafka
+postgres/data
+data/checkpoints
+data/last_processed.json
+logs
+.ivy2

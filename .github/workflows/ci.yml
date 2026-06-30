@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Create CI environment file
+        run: cp .env.example .env
+
+      - name: Static validation
+        run: |
+          python -m compileall -q src dags tests
+          docker compose -f docker-compose.yaml config -q
+          docker compose -f docker-compose-airflow.yaml config -q
+
+      - name: Unit tests
+        run: pytest --cov=src --cov-report=term-missing

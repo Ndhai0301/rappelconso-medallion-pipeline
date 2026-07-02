@@ -7,13 +7,14 @@ from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 from src.constants import (
+    BRONZE_TABLE,
     DB_FIELDS,
     POSTGRES_DB,
     POSTGRES_HOST,
     POSTGRES_PORT,
     POSTGRES_PROPERTIES,
-    POSTGRES_TABLE,
     POSTGRES_URL,
+    SILVER_TABLE,
 )
 from src.postgres_client.migrate import run_migrations
 from src.spark_client.transformation import transform_rappelconso_data
@@ -109,6 +110,7 @@ def create_final_dataframe(dataframe: DataFrame) -> DataFrame:
         "lien_vers_la_liste_des_distributeurs",
         "lien_vers_affichette_pdf",
         "lien_vers_la_fiche_rappel",
+        "raw_json",
         F.col("raw_json").alias("raw_data"),
     )
 
@@ -147,6 +149,26 @@ def _pg_connect():
     )
 
 
+def write_bronze(batch_df: DataFrame, batch_id: int) -> None:
+    bronze_df = batch_df.select(
+        DEDUPLICATION_KEY,
+        F.col("api_id"),
+        "rappel_guid",
+        "numero_fiche",
+        "numero_version",
+        "date_publication",
+        "raw_json",
+        F.lit(f"{RUN_ID}_{batch_id}").alias("_batch_id"),
+    )
+    bronze_df.write.jdbc(
+        POSTGRES_URL,
+        BRONZE_TABLE,
+        mode="append",
+        properties=POSTGRES_PROPERTIES,
+    )
+    logging.info("Batch %s appended to %s", batch_id, BRONZE_TABLE)
+
+
 def _drop_staging(staging: str) -> None:
     try:
         with _pg_connect() as connection:
@@ -166,13 +188,14 @@ def build_upsert_sql(staging: str) -> str:
     update_set = ", ".join(
         f"{column} = EXCLUDED.{column}" for column in DB_FIELDS
     )
+    update_set += ", silver_updated_at = now()"
     return f"""
-        INSERT INTO {POSTGRES_TABLE} ({column_list})
+        INSERT INTO {SILVER_TABLE} ({column_list})
         SELECT {select_list} FROM {staging}
         ON CONFLICT ({DEDUPLICATION_KEY}) DO UPDATE SET {update_set}
-        WHERE {POSTGRES_TABLE}.numero_version IS NULL
+        WHERE {SILVER_TABLE}.numero_version IS NULL
            OR (EXCLUDED.numero_version IS NOT NULL
-               AND EXCLUDED.numero_version >= {POSTGRES_TABLE}.numero_version);
+               AND EXCLUDED.numero_version >= {SILVER_TABLE}.numero_version);
     """
 
 
@@ -182,11 +205,13 @@ def write_batch_to_postgres(batch_df: DataFrame, batch_id: int) -> None:
         logging.info("Batch %s is empty", batch_id)
         return
 
-    batch_deduped = select_latest_versions(batch_with_key)
-    staging = f"dev.rappelconso_staging_{RUN_ID}_{batch_id}"
+    staging = f"silver.rappelconso_staging_{RUN_ID}_{batch_id}"
     write_columns = list(DB_FIELDS) + [DEDUPLICATION_KEY]
 
     try:
+        write_bronze(batch_with_key, batch_id)
+
+        batch_deduped = select_latest_versions(batch_with_key)
         batch_deduped.select(*write_columns).write.jdbc(
             POSTGRES_URL,
             staging,
@@ -196,7 +221,7 @@ def write_batch_to_postgres(batch_df: DataFrame, batch_id: int) -> None:
         with _pg_connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(build_upsert_sql(staging))
-        logging.info("Batch %s upserted to %s", batch_id, POSTGRES_TABLE)
+        logging.info("Batch %s upserted to %s", batch_id, SILVER_TABLE)
     except Exception:
         logging.exception("Batch %s failed", batch_id)
         raise

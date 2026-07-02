@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: silver
+    tables:
+      - name: rappelconso_clean
+        identifier: rappelconso_clean
+        loaded_at_field: silver_updated_at
+        columns:
+          - name: deduplication_key
+            tests:
+              - not_null

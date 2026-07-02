@@ -15,8 +15,8 @@ def replay() -> int:
             with connection.cursor(name="rappelconso_replay") as cursor:
                 cursor.itersize = 1000
                 cursor.execute(
-                    "SELECT raw_data::text FROM dev.rappelconso_raw "
-                    "WHERE raw_data IS NOT NULL ORDER BY db_id"
+                    "SELECT raw_data::text FROM silver.rappelconso_clean "
+                    "WHERE raw_data IS NOT NULL ORDER BY silver_id"
                 )
                 for (raw_data,) in cursor:
                     producer.send(KAFKA_TOPIC, value=json.loads(raw_data))

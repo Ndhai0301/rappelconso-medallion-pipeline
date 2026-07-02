@@ -1,0 +1,19 @@
+name: "rappelconso"
+version: "1.0.0"
+config-version: 2
+profile: "rappelconso"
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+macro-paths: ["macros"]
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  rappelconso:
+    staging:
+      +schema: silver
+      +materialized: view
+    marts:
+      gold:
+        +schema: gold
+        +materialized: table

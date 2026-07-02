@@ -16,6 +16,7 @@ x-airflow-common: &airflow-common
     KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     KAFKA_TOPIC: rappelconso_raw
     POSTGRES_HOST: db
+    PYTHONPATH: /opt/airflow/project
   volumes:
     - .:/opt/airflow/project
     - ./dags:/opt/airflow/dags
@@ -42,6 +43,8 @@ services:
       - ./postgres/data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
       - ./sql/migrate_add_dedup_key.sql:/docker-entrypoint-initdb.d/002-migrate.sql:ro
+      - ./sql/003_medallion.sql:/docker-entrypoint-initdb.d/003-medallion.sql:ro
+      - ./sql/004_backfill_and_drop_dev.sql:/docker-entrypoint-initdb.d/004-backfill.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -120,9 +123,31 @@ services:
       retries: 10
     restart: unless-stopped
 
+  metabase:
+    image: metabase/metabase:v0.50.34
+    container_name: pipeline_metabase
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase-data:/metabase-data
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - airflow-kafka
+
 volumes:
   airflow-logs:
   airflow-db-data:
+  metabase-data:
 
 networks:
   airflow-kafka:

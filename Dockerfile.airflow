@@ -18,3 +18,9 @@ USER airflow
 RUN pip install --no-cache-dir \
     "apache-airflow==${AIRFLOW_VERSION}" \
     -r /tmp/project-requirements.txt
+
+# dbt is installed into its own venv, isolated from Airflow's site-packages:
+# dbt-core requires protobuf>=5, which conflicts with the protobuf==4.25.3
+# pinned by Airflow 2.9.3's own constraints file.
+RUN python3 -m venv /home/airflow/dbt-venv && \
+    /home/airflow/dbt-venv/bin/pip install --no-cache-dir dbt-postgres==1.9.1

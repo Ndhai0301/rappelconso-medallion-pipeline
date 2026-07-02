@@ -20,3 +20,9 @@ data/checkpoints/
 data/last_processed.json
 logs/
 .ivy2/
+
+# dbt
+dbt/rappelconso/target/
+dbt/rappelconso/dbt_packages/
+dbt/rappelconso/logs/
+dbt/rappelconso/.user.yml

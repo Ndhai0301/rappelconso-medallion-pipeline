@@ -15,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_FILES = (
     PROJECT_ROOT / "sql" / "init.sql",
     PROJECT_ROOT / "sql" / "migrate_add_dedup_key.sql",
+    PROJECT_ROOT / "sql" / "003_medallion.sql",
+    PROJECT_ROOT / "sql" / "004_backfill_and_drop_dev.sql",
 )
 
 

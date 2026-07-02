@@ -17,7 +17,8 @@ URL_API = (
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "rappelconso")
-POSTGRES_TABLE = os.getenv("POSTGRES_TABLE", "dev.rappelconso_raw")
+BRONZE_TABLE = os.getenv("BRONZE_TABLE", "bronze.rappelconso_events")
+SILVER_TABLE = os.getenv("SILVER_TABLE", "silver.rappelconso_clean")
 POSTGRES_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 POSTGRES_PROPERTIES = {
     "user": os.getenv("POSTGRES_USER", "admin"),

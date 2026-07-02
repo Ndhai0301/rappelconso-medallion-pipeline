@@ -34,3 +34,9 @@ def test_run_migrations_executes_all_sql_files(tmp_path, monkeypatch):
     migrate.run_migrations()
 
     assert executed == ["SELECT 1;", "SELECT 2;"]
+
+
+def test_migration_files_are_registered_and_exist():
+    assert len(migrate.MIGRATION_FILES) == 4
+    for migration_file in migrate.MIGRATION_FILES:
+        assert migration_file.exists(), f"missing migration file: {migration_file}"

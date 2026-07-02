@@ -51,24 +51,28 @@ models:
                 field: date_key
       - name: produit_key
         tests:
+          - not_null
           - relationships:
               arguments:
                 to: ref('dim_produit')
                 field: produit_key
       - name: marque_key
         tests:
+          - not_null
           - relationships:
               arguments:
                 to: ref('dim_marque')
                 field: marque_key
       - name: risque_key
         tests:
+          - not_null
           - relationships:
               arguments:
                 to: ref('dim_risque')
                 field: risque_key
       - name: distributeur_key
         tests:
+          - not_null
           - relationships:
               arguments:
                 to: ref('dim_distributeur')

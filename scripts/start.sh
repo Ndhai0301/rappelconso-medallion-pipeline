@@ -16,7 +16,21 @@ chmod -R u+rwX,g+rwX .ivy2 data kafka postgres
 
 docker compose -f docker-compose.yaml up -d kafka kafka-ui
 docker compose -f docker-compose-airflow.yaml up -d --build \
-  db airflow-db airflow-init airflow-webserver airflow-scheduler
+  db airflow-db airflow-init airflow-webserver airflow-scheduler metabase
+
+echo "Waiting for Metabase to become healthy..."
+for _ in $(seq 1 40); do
+  status=$(docker inspect --format='{{.State.Health.Status}}' pipeline_metabase 2>/dev/null || echo "starting")
+  [[ "$status" == "healthy" ]] && break
+  sleep 3
+done
+
+docker compose -f docker-compose-airflow.yaml exec -T \
+  -e METABASE_URL=http://metabase:3000 \
+  airflow-webserver python /opt/airflow/project/scripts/setup_metabase.py \
+  || echo "Metabase auto-setup did not complete; run it manually later with:
+  docker compose -f docker-compose-airflow.yaml exec -e METABASE_URL=http://metabase:3000 airflow-webserver python /opt/airflow/project/scripts/setup_metabase.py"
 
 echo "Airflow:  http://localhost:8080 (admin/admin)"
 echo "Kafka UI: http://localhost:8000"
+echo "Metabase: http://localhost:3000 (admin@example.com / Rappelconso123!)"

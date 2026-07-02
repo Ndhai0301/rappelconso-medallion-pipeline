@@ -63,12 +63,12 @@ Docker network, builds the Airflow image, and starts all services.
 | Airflow | http://localhost:8080 | `admin` / `admin` |
 | Kafka UI | http://localhost:8000 | none |
 | PostgreSQL | `localhost:5432` | values from `.env` |
-| Metabase | http://localhost:3000 | set on first visit |
+| Metabase | http://localhost:3000 | `admin@example.com` / `Rappelconso123!` |
 
 Enable `rappelconso_pipeline` in Airflow and trigger it manually. The DAG runs:
 
 ```text
-migrate_postgres -> fetch_and_produce -> spark_to_postgres -> dbt_deps -> dbt_snapshot -> dbt_run -> dbt_test -> log_audit
+migrate_postgres -> fetch_and_produce -> spark_to_postgres -> dbt_deps -> dbt_snapshot -> dbt_run -> dbt_test -> dbt_docs_generate -> log_audit
 ```
 
 ## Data Warehouse Layers
@@ -94,6 +94,18 @@ this as `valid_from` / `valid_to` / `is_current` — one fact row per historical
 version of a recall (SCD Type 2). The four dimensions are current-state
 (SCD Type 1), since they're derived attributes rather than independently
 versioned entities.
+
+The Silver upsert only bumps `silver_updated_at` (and therefore only produces
+a new snapshot/SCD2 version) when the incoming row is a strictly newer
+`numero_version`, or the same version with materially different content —
+re-upserting an unchanged row is a no-op, so replays and reruns never
+fabricate fake history.
+
+`dim_produit`/`dim_marque`/`dim_risque`/`dim_distributeur` each carry an
+`Unknown` member; `fact_rappel`'s foreign keys are `COALESCE`d to it whenever
+the source attribute is `NULL`, so every FK in `fact_rappel` is `not_null`
+(enforced by a dbt test) instead of silently dropping out of `relationships`
+checks.
 
 ## Run Components Manually
 
@@ -186,17 +198,23 @@ SELECT * FROM audit_pipeline_runs ORDER BY started_at DESC LIMIT 5;
 
 ## Metabase
 
-Open http://localhost:3000, complete the first-run setup wizard, then add a
-database connection:
+`scripts/start.sh` runs `scripts/setup_metabase.py` automatically once
+Metabase is healthy: it completes the first-run setup (site name, admin
+account), connects a Postgres database scoped to the `gold` schema, and
+publishes a starter dashboard ("RappelConso - Vue d'ensemble") with recall
+counts by category, a monthly trend, top distributors, and a total-recalls
+scalar. Log in at http://localhost:3000 with `admin@example.com` /
+`Rappelconso123!` (override via `METABASE_ADMIN_EMAIL`/
+`METABASE_ADMIN_PASSWORD`) and open the dashboard from the home page.
 
-- Type: PostgreSQL
-- Host: `db` (or `localhost` if connecting from outside Docker)
-- Port: `5432`
-- Database name: value of `POSTGRES_DB` in `.env`
-- Username / password: values of `POSTGRES_USER` / `POSTGRES_PASSWORD`
+The script is idempotent — safe to rerun, it skips any step already done. To
+run it by hand (e.g. after `docker compose restart metabase`):
 
-Browse the `gold` schema to build questions/dashboards on `fact_rappel` and
-its dimensions.
+```bash
+docker compose -f docker-compose-airflow.yaml exec \
+  -e METABASE_URL=http://metabase:3000 \
+  airflow-webserver python /opt/airflow/project/scripts/setup_metabase.py
+```
 
 ## Tests
 

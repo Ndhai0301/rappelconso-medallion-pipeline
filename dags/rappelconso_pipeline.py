@@ -83,10 +83,18 @@ with DAG(
         ),
     )
 
+    dbt_docs_generate = BashOperator(
+        task_id="dbt_docs_generate",
+        bash_command=(
+            f"{DBT_BIN} docs generate --project-dir {DBT_PROJECT_DIR} "
+            f"--profiles-dir {DBT_PROJECT_DIR}"
+        ),
+    )
+
     log_audit = PythonOperator(
         task_id="log_audit",
         python_callable=log_audit_run,
         trigger_rule="all_done",
     )
 
-    migrate_postgres >> fetch_and_produce >> spark_to_postgres >> dbt_deps >> dbt_snapshot >> dbt_run >> dbt_test >> log_audit
+    migrate_postgres >> fetch_and_produce >> spark_to_postgres >> dbt_deps >> dbt_snapshot >> dbt_run >> dbt_test >> dbt_docs_generate >> log_audit

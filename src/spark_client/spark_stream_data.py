@@ -17,7 +17,7 @@ from src.constants import (
     SILVER_TABLE,
 )
 from src.postgres_client.migrate import run_migrations
-from src.spark_client.transformation import transform_rappelconso_data
+from src.spark_client.transformation import RAPPELCONSO_SCHEMA, transform_rappelconso_data
 
 
 logging.basicConfig(
@@ -110,7 +110,6 @@ def create_final_dataframe(dataframe: DataFrame) -> DataFrame:
         "lien_vers_la_liste_des_distributeurs",
         "lien_vers_affichette_pdf",
         "lien_vers_la_fiche_rappel",
-        "raw_json",
         F.col("raw_json").alias("raw_data"),
     )
 
@@ -150,14 +149,31 @@ def _pg_connect():
 
 
 def write_bronze(batch_df: DataFrame, batch_id: int) -> None:
-    bronze_df = batch_df.select(
-        DEDUPLICATION_KEY,
-        F.col("api_id"),
-        "rappel_guid",
-        "numero_fiche",
-        "numero_version",
-        "date_publication",
-        "raw_json",
+    """Append every raw Kafka message in the batch to bronze, as-is.
+
+    This runs on the raw Kafka batch (before any schema validation or
+    dedup-key filtering) so malformed or unidentifiable messages are still
+    preserved for audit/investigation. Field extraction below is best-effort:
+    unparseable JSON just yields null fields, not a dropped row.
+    """
+    raw_df = batch_df.select(
+        F.coalesce(F.col("value").cast("string"), F.lit("{}")).alias("raw_json")
+    )
+    parsed_df = raw_df.withColumn(
+        "data", F.from_json(F.col("raw_json"), RAPPELCONSO_SCHEMA)
+    )
+    bronze_df = parsed_df.select(
+        F.coalesce(
+            F.col("data.rappel_guid"),
+            F.col("data.numero_fiche"),
+            F.col("data.id").cast("string"),
+        ).alias(DEDUPLICATION_KEY),
+        F.col("data.id").alias("api_id"),
+        F.col("data.rappel_guid").alias("rappel_guid"),
+        F.col("data.numero_fiche").alias("numero_fiche"),
+        F.col("data.numero_version").alias("numero_version"),
+        F.to_timestamp(F.col("data.date_publication")).alias("date_publication"),
+        F.col("raw_json"),
         F.lit(f"{RUN_ID}_{batch_id}").alias("_batch_id"),
     )
     bronze_df.write.jdbc(
@@ -189,19 +205,42 @@ def build_upsert_sql(staging: str) -> str:
         f"{column} = EXCLUDED.{column}" for column in DB_FIELDS
     )
     update_set += ", silver_updated_at = now()"
+    # raw_data is excluded from the content-diff: it's the pass-through raw
+    # Kafka payload, which embeds a fresh raw_ingested_at_utc on every
+    # re-fetch (the producer's cursor intentionally overlaps by a day), so
+    # it never compares equal across replays even when nothing of substance
+    # changed. Comparing it here would fabricate a new SCD2 version on every
+    # re-fetch of an otherwise-unchanged recall.
+    content_changed = " OR ".join(
+        f"{SILVER_TABLE}.{column} IS DISTINCT FROM EXCLUDED.{column}"
+        for column in DB_FIELDS
+        if column not in ("numero_version", "raw_data")
+    )
+    # Only overwrite silver (and therefore bump silver_updated_at, which
+    # drives the dbt snapshot's SCD2 history) when the incoming row is a
+    # strictly newer version, or the same version but with materially
+    # different content. Re-upserting an unchanged row must be a no-op,
+    # otherwise every replay/rerun fabricates a new snapshot version.
     return f"""
         INSERT INTO {SILVER_TABLE} ({column_list})
         SELECT {select_list} FROM {staging}
         ON CONFLICT ({DEDUPLICATION_KEY}) DO UPDATE SET {update_set}
         WHERE {SILVER_TABLE}.numero_version IS NULL
-           OR (EXCLUDED.numero_version IS NOT NULL
-               AND EXCLUDED.numero_version >= {SILVER_TABLE}.numero_version);
+           OR (
+               EXCLUDED.numero_version IS NOT NULL
+               AND (
+                   EXCLUDED.numero_version > {SILVER_TABLE}.numero_version
+                   OR (
+                       EXCLUDED.numero_version = {SILVER_TABLE}.numero_version
+                       AND ({content_changed})
+                   )
+               )
+           );
     """
 
 
 def write_batch_to_postgres(batch_df: DataFrame, batch_id: int) -> None:
-    batch_with_key = add_deduplication_key(batch_df)
-    if batch_with_key.isEmpty():
+    if batch_df.isEmpty():
         logging.info("Batch %s is empty", batch_id)
         return
 
@@ -209,7 +248,13 @@ def write_batch_to_postgres(batch_df: DataFrame, batch_id: int) -> None:
     write_columns = list(DB_FIELDS) + [DEDUPLICATION_KEY]
 
     try:
-        write_bronze(batch_with_key, batch_id)
+        write_bronze(batch_df, batch_id)
+
+        final_df = create_final_dataframe(batch_df)
+        batch_with_key = add_deduplication_key(final_df)
+        if batch_with_key.isEmpty():
+            logging.info("Batch %s has no rows eligible for silver", batch_id)
+            return
 
         batch_deduped = select_latest_versions(batch_with_key)
         batch_deduped.select(*write_columns).write.jdbc(
@@ -246,8 +291,7 @@ def write_to_postgres() -> None:
     spark = create_spark_session()
     try:
         kafka_df = create_initial_dataframe(spark)
-        final_df = create_final_dataframe(kafka_df)
-        start_streaming(final_df)
+        start_streaming(kafka_df)
     finally:
         spark.stop()
 

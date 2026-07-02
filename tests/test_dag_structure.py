@@ -13,8 +13,10 @@ def test_dag_contains_pipeline_tasks_in_source():
     assert 'task_id="dbt_snapshot"' in source
     assert 'task_id="dbt_run"' in source
     assert 'task_id="dbt_test"' in source
+    assert 'task_id="dbt_docs_generate"' in source
     assert 'task_id="log_audit"' in source
     assert (
         "migrate_postgres >> fetch_and_produce >> spark_to_postgres >> "
-        "dbt_deps >> dbt_snapshot >> dbt_run >> dbt_test >> log_audit"
+        "dbt_deps >> dbt_snapshot >> dbt_run >> dbt_test >> "
+        "dbt_docs_generate >> log_audit"
     ) in source
